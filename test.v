@@ -1,19 +1,21 @@
 module vending_machine(
     input clk,
     input reset,
-    input [7:0] coin,          // 直接當金額：1,5,10,50
+    input [7:0] coin,          // 1,5,10,50
     input [2:0] drink_choose,  // 001=tea,010=coke,011=coffee,100=milk
     output reg [7:0] total_money,
     output reg [2:0] state,
     output reg [7:0] exchange,
-    output reg [2:0] drink_out
+    output reg [7:0] drink_out
 );
 
-localparam S0 = 3'b000, //投錢
-           S1 = 3'b001, //選飲料
-           S2 = 3'b010; //找零 & 回到 S0
+// State definition
+localparam S0 = 3'b000, // Insert Coin
+           S1 = 3'b001, // Select Drink
+           S2 = 3'b010, // Dispense Drink
+           S3 = 3'b011; // Change / Checkout
 
-// 價格表
+// Price function
 function [7:0] price;
 input [2:0] drink;
 begin
@@ -27,89 +29,86 @@ begin
 end
 endfunction
 
-// coin 脈衝偵測
+// Coin edge detection
 reg [7:0] last_coin;
-always @(posedge clk or posedge reset)
-    if (reset) last_coin <= 0;
-    else       last_coin <= coin;
+always @(posedge clk or negedge reset)
+    if (!reset) last_coin <= 0;
+    else        last_coin <= coin;
 
 wire coin_valid = (coin != 0) && (last_coin == 0);
 
-// 狀態暫存器
+// Next state logic
 reg [2:0] next_state;
 
-always @(posedge clk or posedge reset) begin
-    if (reset)
-        state <= S0;
-    else
-        state <= next_state;
-end
-
-// next_state 邏輯
 always @(*) begin
     case (state)
         S0: begin
-            if (coin_valid && (total_money + coin >= 10))
-                next_state = S1;       // 有錢可買至少一種飲料
+            if (total_money >= 8'd10)
+                next_state = S1;
             else
                 next_state = S0;
         end
 
         S1: begin
-            if (drink_choose != 0 && total_money >= price(drink_choose))
-                next_state = S2;       // 夠錢且已選飲料 → 出貨/找零
-            else if (drink_choose != 0 && total_money < price(drink_choose))
-                next_state = S0;       // 錢不夠 → 回去 S0 繼續投
+            if (coin_valid)
+                next_state = S0; // Go back to S0 to handle coin insertion
+            else if (drink_choose != 0 && total_money >= price(drink_choose))
+                next_state = S2; // Dispense
+            else if (total_money < 8'd10)
+                next_state = S0; // Should not happen if logic is correct, but safety
             else
-                next_state = S1;       // 等待選飲料
+                next_state = S1; // Stay in selection
         end
 
-        S2: next_state = S0;           // 出貨/找零後回 S0
+        S2: next_state = S3; // Go to change
+
+        S3: next_state = S0; // Go back to start
 
         default: next_state = S0;
     endcase
 end
 
-// money / output 一個 block 處理（避免多重驅動）
-always @(posedge clk or posedge reset) begin
-    if (reset) begin
-        total_money <= 0;
-        exchange    <= 0;
+// State and Data registers
+always @(posedge clk or negedge reset) begin
+    if (!reset) begin
+        state       <= S3;
         drink_out   <= 0;
     end else begin
+        state <= next_state;
+
+        // Logic for data handling
         case (state)
             S0: begin
                 exchange  <= 0;
                 drink_out <= 0;
                 if (coin_valid) begin
                     total_money <= total_money + coin;
-
-                    // 顯示可買飲料
-                    $display("-----------------------------");
-                    $display("Total money = %0d", total_money + coin);
-                    $display("可購買:");
-                    if (total_money + coin >= 10) $display("  tea (10)");
-                    if (total_money + coin >= 15) $display("  coke (15)");
-                    if (total_money + coin >= 20) $display("  coffee (20)");
-                    if (total_money + coin >= 25) $display("  milk (25)");
-                    $display("-----------------------------");
                 end
             end
 
             S1: begin
-                if (drink_choose != 0 && total_money >= price(drink_choose)) begin
-                    drink_out   <= drink_choose;                    // 出貨哪一種
-                    total_money <= total_money - price(drink_choose); // 扣掉價格
+                exchange  <= 0;
+                drink_out <= 0;
+                if (coin_valid) begin
+                    total_money <= total_money + coin; 
+                end
+                
+                if (drink_choose != 0 && total_money >= price(drink_choose) && !coin_valid) begin
+                    // Prepare for S2
+                    total_money <= total_money - price(drink_choose);
+                    drink_out   <= {5'b0, drink_choose}; // Output drink ID
                 end
             end
 
             S2: begin
-                exchange    <= total_money; // 剩下的當找零
-                total_money <= 0;
+                // Drink is dispensed (drink_out is valid from S1 transition)
+                // Wait for transition to S3
             end
 
-            default: begin
-                // 可以保持上一值或清零，看你老師要求
+            S3: begin
+                drink_out <= 0;
+                exchange    <= total_money;
+                total_money <= 0;
             end
         endcase
     end
