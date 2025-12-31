@@ -28,8 +28,9 @@ module vending_machine(
     reg [7:0] current_cost;
     reg [2:0] selected_drink;
 
-    always @(posedge clk or negedge reset) begin
-        if (!reset) begin
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            exchange       <= total_money;
             // ---------- reset all ----------
             state           <= S0;
             total_money     <= 8'd0;
@@ -39,7 +40,6 @@ module vending_machine(
             selected_drink  <= 3'd0;
         end else begin
             case (state)
-
                 // ==================================================
                 // S0 : insert coin only
                 // ==================================================
