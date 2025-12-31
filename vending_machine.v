@@ -28,7 +28,7 @@ module vending_machine(
     reg [7:0] current_cost;
     reg [2:0] selected_drink;
 
-    always @(posedge clk or reset) begin
+    always @(posedge clk or negedge reset) begin
         if (!reset) begin
             // ---------- reset all ----------
             state           <= S0;
